@@ -10,4 +10,4 @@ set hlsearch "Highlight search results
 set number "Show line numbers
 set showmatch "Highlight matching parenthesis-type characters when the cursor is on one.
 set autoindent "Automatically match current line's indentation on newlines.
-set wildmenu #Enable a fun bar at the bottom of the screen when tab-autocompleting commands
+set wildmenu "Enable a fun bar at the bottom of the screen when tab-autocompleting commands
