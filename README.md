@@ -29,7 +29,10 @@ This is the most precise, and fastest-to-use clock available. First we will need
 
 #### Configuring the RPI for a constant 1.2GHz operation
 
-This is vital to get accurate readings based on the cycle count.
+This is vital to get accurate readings based on the cycle count - if each cycle is a variable amount of time, cycle count is useless!
+
+1. Edit the file `/etc/init.d/raspi-config`. Change the line that looks something like `echo "ondemand" > $SYS_CPUFREQ_GOVERNOR` to  `echo "performance" > $SYS_CPUFREQ_GOVERNOR`
+2. Verify that the change took. Reboot and run `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq` - you should see 1200000.
 
 ### Configuring the bootline to section off CPU 2
 
