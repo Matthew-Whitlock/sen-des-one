@@ -14,6 +14,23 @@ This is the instruction set for configuring the Raspberry Pi to run - starting f
 
 And you should be good to go!
 
+### Giving user access to the cycle count register
+
+This is the most precise, and fastest-to-use clock available. First we will need to build and install a Loadable Kernel Module (LKM).
+
+1. We need access to the kernel headers before we continue. If you have insalled a custom kernel, you should know where these are and should modify the makefile accordingly.  Otherwise, run `sudo apt install raspberrypi-kernel raspberrypi-kernel-headers`  
+2. In the LKM directory, run `make`
+3. (Optional) Test that the module loads correctly. Run `sudo insmod enable_ccr.ko` then `dmesg | tail`. You should see the line "User-level access to CCR has been turned on."
+4. Next we need to get the module to load every time we boot. Copy the enable\_ccr.ko file to the folder `/lib/modules/4.14.62-v7+/kernel/drivers`. Modify the `4.14.62-v7+` folder to the name of your kernel, if needed.
+5. Edit `/etc/modules` to add the line `enable_ccr` at the end.
+6. Run `sudo depmod`
+7. Verify that the module is being loaded by rebooting and running the command `lsmod | grep enable_ccr`. If you see no output, there is an error you will need to debug.
+
+
+#### Configuring the RPI for a constant 1.2GHz operation
+
+This is vital to get accurate readings based on the cycle count.
+
 ### Configuring the bootline to section off CPU 2
 
 Coming up next.
