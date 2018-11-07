@@ -68,7 +68,7 @@ int setup() {
   //Now set each to alt function 0
   *gpio |= 4<<12;
   //*gpio |= 4<<15;
-  //*gpio |= 4<<18;
+  *gpio |= 4<<18;
 
   return(1);
 }
@@ -111,26 +111,28 @@ int interrupts(int flag) {
 }
 
 int main(){
+   unsigned timer1, timer2; 
    setup();
-   unsigned timer1, timer2;
-	//First, turn off all gpio clocks.
+    
+   //Configure and enable the clock outputs. Clock 0 is for the transducer, clock 2 is for the ADC
+	
+   //First, turn off all gpio clocks.
 	*clk     = CLK_PSWD;
-	//*(clk+2) = CLK_PSWD;
-	//*(clk+4) = CLK_PSWD;
-	while((*clk & CLK_BUSY)/* || (*(clk+2) & CLK_BUSY) || (*(clk+4) & CLK_BUSY)*/){
+	*(clk+4) = CLK_PSWD;
+	while((*clk & CLK_BUSY) || (*(clk+4) & CLK_BUSY)){
       //Do nothing - we're waiting for the clocks to safely stop.i
    }
 
    //Now configure clock scaling frequencies
-   *(clk+1) = CLK_PSWD | (203<<12);
-   //*(clk+3) = CLK_PSWD | (203<<12);
+   *(clk+1) = CLK_PSWD | (203<<12); //2.46MHz
+   *(clk+5) = CLK_PSWD | (263<<12); //1.90MHz //TODO: Could this be higher?
    
-   //Configure and enable the transducer signal clocks.
+   
    *clk =     CLK_PSWD | CLK_PLLD_SRC;
-   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC;
+   *(clk+4) = CLK_PSWD | CLK_PLLD_SRC;
    
-   *clk =     CLK_PSWD | CLK_PLLD_SRC            | CLK_ENABLE;
-   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
+   *clk =     CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
+   *(clk+4) = CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
 
    //Wait for 8 pulses to be sent.
    GET_CYCLE(timer1);
@@ -139,7 +141,13 @@ int main(){
       GET_CYCLE(timer2);
    }
 
-   //Now disable to transducer clocks.
+   //Now disable transducer clock
    *clk =     CLK_PSWD | CLK_PLLD_SRC;
-   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC;
+   
+   //Now we just need to take lots of measurements.
+
+   
+   
+   
+   *(clk+4) = CLK_PSWD | CLK_PLLD_SRC;
 }
