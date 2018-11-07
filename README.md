@@ -36,4 +36,9 @@ This is vital to get accurate readings based on the cycle count - if each cycle 
 
 ### Configuring the bootline to section off CPU 2
 
-Coming up next.
+Warning: You can change which core is isolated, but changing it to core 0 is ineffective.
+
+1. Add ` isolcpus=2` to the end of the first line in the file `/boot/cmdline.txt`
+2. When running the time-sensitive code, you will need to run it by running `taskset -c 2 [command]`, which will force the command to run on our isolated cpu 2.
+
+###
