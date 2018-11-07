@@ -1,3 +1,5 @@
+register_level_gpio
+
 # Prerequisites
 *.d
 

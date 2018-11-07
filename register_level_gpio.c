@@ -4,13 +4,13 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
-#define BCM2708_PERI_BASE	0x3F000000
-#define GPIO_BASE  			(BCM2708_PERI_BASE + 0x200000)
-#define INTERUPT_BASE 		(BCM2708_PERI_BASE + 0x00B000)
-#define CLK_BASE			(BCM2708_PERI_BASE + 0x101000) //Clock control actually starts at 0x70 past this!
-#define CLK_OFFSET (0x1D) //0x74/4, so the number of unsigned ints to increment by.
+#define BCM2708_PERI_BASE  0x3F000000
+#define GPIO_BASE          (BCM2708_PERI_BASE + 0x200000)
+#define INTERUPT_BASE      (BCM2708_PERI_BASE + 0x00B000)
+#define CLK_BASE           (BCM2708_PERI_BASE + 0x101000) //Clock control actually starts at 0x70 past this!
+#define CLK_OFFSET (0x1C) //0x70/4, so the number of unsigned ints to increment by.
 
-#define GET_CYCLE(v) asm volatile ("mrc p15, 0, %0, c15, c12, 1" : "=r" (v));
+#define GET_CYCLE(v) asm volatile ("mrc p15, 0, %0, c9, c13, 0":"=r" (v));
 
 #define CLK_PSWD			(0x5A << 24)
 #define CLK_PSWD_MASK   (0xFF << 24)
@@ -56,6 +56,20 @@ int setup() {
   gpclr = gpio + 10;    // clr bit register
   gpin = gpio + 13;     // read all bits register
 
+   
+
+  //Now that we've set up the register access stuff
+  //For convenience, we can also setup pins 4,5,&6 
+  //to output the GPIO output.
+  //Function select registers for 4/5/6 are in the 
+  //first register of gpio
+  //Mask function selects of the 3 to 0
+  *gpio &= ~(511<<12);
+  //Now set each to alt function 0
+  *gpio |= 4<<12;
+  //*gpio |= 4<<15;
+  //*gpio |= 4<<18;
+
   return(1);
 }
 
@@ -100,40 +114,32 @@ int main(){
    setup();
    unsigned timer1, timer2;
 	//First, turn off all gpio clocks.
-	*clk     &= ~CLK_PSWD_MASK;
-	*(clk+1) &= ~CLK_PSWD_MASK;
-	*(clk+2) &= ~CLK_PSWD_MASK;
-	*(clk+3) &= ~CLK_PSWD_MASK;
-	*(clk+4) &= ~CLK_PSWD_MASK;
-	*(clk+5) &= ~CLK_PSWD_MASK;
-	*clk     &= ~CLK_ENABLE;
-	*(clk+2) &= ~CLK_ENABLE;
-	*(clk+4) &= ~CLK_ENABLE;
-	*clk     |= CLK_PSWD;
-	*(clk+2) |= CLK_PSWD;
-	*(clk+4) |= CLK_PSWD;
-	while(*clk & CLK_BUSY || *(clk+2) & CLK_BUSY || *(clk+4) & CLK_BUSY){
-      //Do nothing - we're waiting for the clocks to safely stop.
+	*clk     = CLK_PSWD & ~CLK_ENABLE;
+	*(clk+2) = CLK_PSWD & ~CLK_ENABLE;
+	*(clk+4) = CLK_PSWD & ~CLK_ENABLE;
+	while((*clk & CLK_BUSY) || (*(clk+2) & CLK_BUSY) || (*(clk+4) & CLK_BUSY)){
+      //Do nothing - we're waiting for the clocks to safely stop.i
    }
 
    //Now configure clock scaling frequencies
-   *(clk+1) = CLK_PSWD & 203<<12;
-   *(clk+3) = CLK_PSWD & 203<<12;
+   *(clk+1) = CLK_PSWD & (203<<12);
+   *(clk+3) = CLK_PSWD & (203<<12);
    
    //Configure and enable the transducer signal clocks.
-   *clk =     CLK_PSWD & CLK_ENABLE & CLK_PLLD_SRC;
-   *(clk+2) = CLK_PSWD & CLK_ENABLE & CLK_PLLD_SRC & CLK_FLIP;
+   *clk =     CLK_PSWD & CLK_PLLD_SRC;
+   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP;
+   
+   *clk =     CLK_PSWD & CLK_PLLD_SRC            & CLK_ENABLE;
+   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP & CLK_ENABLE;
 
    //Wait for 8 pulses to be sent.
-   fprintf(stderr, "Here!\n");
    GET_CYCLE(timer1);
    GET_CYCLE(timer2);
-   while(timer1 - timer2 < 3902){
+   while(timer2 - timer1 < 3902){
       GET_CYCLE(timer2);
    }
-   fprintf(stderr, "Here!\n");
 
    //Now disable to transducer clocks.
-   *clk &=     ~CLK_ENABLE;
-   *(clk+2) &= ~CLK_ENABLE;
+   *clk =     CLK_PSWD & CLK_PLLD_SRC;
+   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP;
 }
