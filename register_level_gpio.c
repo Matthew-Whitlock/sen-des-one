@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <sys/mman.h>
 
 #define BCM2708_PERI_BASE	0x3F000000
@@ -9,11 +10,20 @@
 #define CLK_BASE			(BCM2708_PERI_BASE + 0x101000) //Clock control actually starts at 0x70 past this!
 #define CLK_OFFSET (0x1D) //0x74/4, so the number of unsigned ints to increment by.
 
+#define GET_CYCLE(v) asm volatile ("mrc p15, 0, %0, c15, c12, 1" : "=r" (v));
+
+#define CLK_PSWD			(0x5A << 24)
+#define CLK_PSWD_MASK   (0xFF << 24)
+#define CLK_ENABLE      (1 << 4)
+#define CLK_BUSY        (1 << 7)
+#define CLK_PLLD_SRC    (6)
+#define CLK_FLIP        (1<<8)
+
 volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt;
 
 int setup() {
   int memfd;
-  void *gpio_map,*timer_map,*int_map;
+  void *gpio_map,*clk_map,*int_map;
 
   memfd = open("/dev/mem",O_RDWR|O_SYNC);
   if(memfd < 0) {
@@ -23,13 +33,13 @@ int setup() {
 
   gpio_map = mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,GPIO_BASE);
 
-  clk_map = mmap(NULL,4096,PROT_READ|PROT_WRITE, MAP_SHARED,memfd,TIMER_BASE);
+  clk_map = mmap(NULL,4096,PROT_READ|PROT_WRITE, MAP_SHARED,memfd,CLK_BASE);
 
-  int_map = mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,INT_BASE);
+  int_map = mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,INTERUPT_BASE);
 
   close(memfd);
 
-  if(gpio_map == MAP_FAILED  || timer_map == MAP_FAILED || clk_map == MAP_FAILED) {
+  if(gpio_map == MAP_FAILED  || clk_map == MAP_FAILED || clk_map == MAP_FAILED) {
     printf("Map failed\n");
     return(0);
   }
@@ -38,7 +48,7 @@ int setup() {
   intrupt = (volatile unsigned *)int_map;
   
   //timer pointer
-  clk = (volatile unsigned *)timer_map + CLK_OFFSET;
+  clk = (volatile unsigned *)clk_map + CLK_OFFSET;
 
   //GPIO pointers
   gpio = (volatile unsigned *)gpio_map;
@@ -87,5 +97,43 @@ int interrupts(int flag) {
 }
 
 int main(){
-	//TODO: This.
+   setup();
+   unsigned timer1, timer2;
+	//First, turn off all gpio clocks.
+	*clk     &= ~CLK_PSWD_MASK;
+	*(clk+1) &= ~CLK_PSWD_MASK;
+	*(clk+2) &= ~CLK_PSWD_MASK;
+	*(clk+3) &= ~CLK_PSWD_MASK;
+	*(clk+4) &= ~CLK_PSWD_MASK;
+	*(clk+5) &= ~CLK_PSWD_MASK;
+	*clk     &= ~CLK_ENABLE;
+	*(clk+2) &= ~CLK_ENABLE;
+	*(clk+4) &= ~CLK_ENABLE;
+	*clk     |= CLK_PSWD;
+	*(clk+2) |= CLK_PSWD;
+	*(clk+4) |= CLK_PSWD;
+	while(*clk & CLK_BUSY || *(clk+2) & CLK_BUSY || *(clk+4) & CLK_BUSY){
+      //Do nothing - we're waiting for the clocks to safely stop.
+   }
+
+   //Now configure clock scaling frequencies
+   *(clk+1) = CLK_PSWD & 203<<12;
+   *(clk+3) = CLK_PSWD & 203<<12;
+   
+   //Configure and enable the transducer signal clocks.
+   *clk =     CLK_PSWD & CLK_ENABLE & CLK_PLLD_SRC;
+   *(clk+2) = CLK_PSWD & CLK_ENABLE & CLK_PLLD_SRC & CLK_FLIP;
+
+   //Wait for 8 pulses to be sent.
+   fprintf(stderr, "Here!\n");
+   GET_CYCLE(timer1);
+   GET_CYCLE(timer2);
+   while(timer1 - timer2 < 3902){
+      GET_CYCLE(timer2);
+   }
+   fprintf(stderr, "Here!\n");
+
+   //Now disable to transducer clocks.
+   *clk &=     ~CLK_ENABLE;
+   *(clk+2) &= ~CLK_ENABLE;
 }
