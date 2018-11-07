@@ -48,7 +48,7 @@ int setup() {
   intrupt = (volatile unsigned *)int_map;
   
   //timer pointer
-  clk = (volatile unsigned *)clk_map + CLK_OFFSET;
+  clk = (((volatile unsigned *)clk_map) + CLK_OFFSET);
 
   //GPIO pointers
   gpio = (volatile unsigned *)gpio_map;
@@ -114,23 +114,23 @@ int main(){
    setup();
    unsigned timer1, timer2;
 	//First, turn off all gpio clocks.
-	*clk     = CLK_PSWD & ~CLK_ENABLE;
-	*(clk+2) = CLK_PSWD & ~CLK_ENABLE;
-	*(clk+4) = CLK_PSWD & ~CLK_ENABLE;
-	while((*clk & CLK_BUSY) || (*(clk+2) & CLK_BUSY) || (*(clk+4) & CLK_BUSY)){
+	*clk     = CLK_PSWD;
+	//*(clk+2) = CLK_PSWD;
+	//*(clk+4) = CLK_PSWD;
+	while((*clk & CLK_BUSY)/* || (*(clk+2) & CLK_BUSY) || (*(clk+4) & CLK_BUSY)*/){
       //Do nothing - we're waiting for the clocks to safely stop.i
    }
 
    //Now configure clock scaling frequencies
-   *(clk+1) = CLK_PSWD & (203<<12);
-   *(clk+3) = CLK_PSWD & (203<<12);
+   *(clk+1) = CLK_PSWD | (203<<12);
+   //*(clk+3) = CLK_PSWD | (203<<12);
    
    //Configure and enable the transducer signal clocks.
-   *clk =     CLK_PSWD & CLK_PLLD_SRC;
-   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP;
+   *clk =     CLK_PSWD | CLK_PLLD_SRC;
+   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC;
    
-   *clk =     CLK_PSWD & CLK_PLLD_SRC            & CLK_ENABLE;
-   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP & CLK_ENABLE;
+   *clk =     CLK_PSWD | CLK_PLLD_SRC            | CLK_ENABLE;
+   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
 
    //Wait for 8 pulses to be sent.
    GET_CYCLE(timer1);
@@ -140,6 +140,6 @@ int main(){
    }
 
    //Now disable to transducer clocks.
-   *clk =     CLK_PSWD & CLK_PLLD_SRC;
-   *(clk+2) = CLK_PSWD & CLK_PLLD_SRC & CLK_FLIP;
+   *clk =     CLK_PSWD | CLK_PLLD_SRC;
+   //*(clk+2) = CLK_PSWD | CLK_PLLD_SRC;
 }
