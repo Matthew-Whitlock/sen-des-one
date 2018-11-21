@@ -28,11 +28,11 @@
 #define CLK_PLLD_SRC    (6)
 #define CLK_FLIP        (1<<8)
 
-volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt, *pwm;
+volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt;
 
 int setup() {
   int memfd;
-  void *gpio_map,*clk_map,*int_map, *pwm_map;
+  void *gpio_map,*clk_map,*int_map;
 
   memfd = open("/dev/mem",O_RDWR|O_SYNC);
   if(memfd < 0) {
@@ -44,14 +44,12 @@ int setup() {
 
   clk_map =  mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,CLK_BASE);
 
-  pwm_map =  mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,PWM_BASE);
-
   int_map =  mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,INTERUPT_BASE);
 
   close(memfd);
 
   if(gpio_map == MAP_FAILED  || clk_map == MAP_FAILED 
-     || clk_map == MAP_FAILED || pwm_map == MAP_FAILED) {
+     || clk_map == MAP_FAILED) {
     printf("Map failed\n");
     return(0);
   }
@@ -61,9 +59,6 @@ int setup() {
   
   //timer pointer
   clk = (((volatile unsigned *)clk_map) + CLK_OFFSET);
-
-  //pwm pointeri - PWM not currently working.
-  pwm = (volatile unsigned *)pwm_map;
 
   //GPIO pointers
   gpio = (volatile unsigned *)gpio_map;
@@ -97,29 +92,6 @@ int setup() {
   *(gpio+1) &= ~(0x7 << 27); //19
   *(gpio+2) &= ~(0x3F); //20/21
   *(gpio+2) &= ~(0x7 << 18); //26
-
-
-  //*(gpio+1) |= 2<<27;
-  //We need to disable pwm, then give it some time to fully disable
-  //*pwm = 0;
-  //unsigned first, second;
-  //GET_CYCLE(first);
-  //GET_CYCLE(second);
-  //while(second - first < 12000) GET_CYCLE(second); //10us
-  //Now setup the PWM clock
-  //*(clk + PWM_CLK_OFFSET) = CLK_PSWD;
-  //while(*(clk + PWM_CLK_OFFSET) & CLK_BUSY);
-  //*(clk + PWM_CLK_OFFSET) = CLK_PSWD | CLK_PLLD_SRC;
-  //*(clk + PWM_CLK_OFFSET + 1) = 2 << 12; //250MHz
-  //*(clk + PWM_CLK_OFFSET) = CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
-
-
-  //We want to set MESN=1 to send our signal in M/S mode
-  //*pwm = 1<<15;
-  //Configure the "range" ie wavelength of channel 1
-  //*(pwm + 6) = 400;
-  //Now set the "data" ie the amount of the wavelength that it sends a 1
-  //*(pwm + 7) = 200;
 
 
   return(1);
@@ -168,11 +140,9 @@ int main(){
    unsigned *measurements_arr = (unsigned*)malloc(200*sizeof(unsigned));
    setup();
 
-   //First we'll enable the ADC PWM clock
-   //Do this before the transducer signal to be sure the ADC
-   //has time to turn on.
-   //*pwm = 1<<8 | 1<<15;
-    
+   //disable interrupts while we do this.
+   while(!interrupts(0));
+
    //Configure and enable ADC clock
    //First, turn off the gpio clock.
    *clk &= ~CLK_PSWD_MASK;
@@ -216,6 +186,10 @@ int main(){
       measurements++;
       GET_CYCLE(timer2);
    }
+   
+   //re-enable interrupts now that the time-sensitive part is done.
+   interrupts(1);
+
 
   // Convert gpio pins to actual value.
   // Pins 6, 13, 19, 26, 12, 16, 20, and 21 are the ADC output DB pins (int order.)
@@ -229,14 +203,27 @@ int main(){
       converted_val |= (((measurements_arr[2*i] >> 20) & 1) << 6);
       converted_val |= (((measurements_arr[2*i] >> 21) & 1) << 7);
       
+      printf("%u", ((measurements_arr[2*i] >> 6) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 13) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 19) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 26) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 12) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 16) & 1));
+      printf("%u", ((measurements_arr[2*i] >> 20) & 1));
+      printf("%u -> ", ((measurements_arr[2*i] >> 21) & 1));
+      
       measurements_arr[2*i] = converted_val;
 
+      double voltage = (double)converted_val/255 * 2;
+
       //For now, just print the value & timestamp.
-      printf("%u @ %u\n", measurements_arr[2*i], measurements_arr[2*i + 1]);
+      printf("%4.3f @ %u\n", voltage, measurements_arr[2*i + 1] - measurements_arr[1]);
    }
+
+   printf("Total measurements: %u\n", measurements);
 
    //Now disable ADC clock
    *clk = CLK_PSWD | CLK_PLLD_SRC;
-
+   
    return 0;
 }
