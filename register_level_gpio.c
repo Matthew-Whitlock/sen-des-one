@@ -1,6 +1,5 @@
 /*
 // Pin 14 is an output pin, for exciting the probe.
-// Pin 15 is used to trigger sending the voltage to the measurement equipment.
 // Pin 4 is a GPIOclk pin for triggering the ADC.
 // Pins 6, 13, 19, 26, 12, 16, 20, and 21 are the ADC output DB pins (in order.)
 // Pin 5 is the EOC pin of the ADC.
@@ -25,7 +24,6 @@
 #define INTERUPT_BASE      (BCM2708_PERI_BASE + 0x00B000)
 #define CLK_BASE           (BCM2708_PERI_BASE + 0x101000) //Clock control actually starts at 0x70 past this!
 #define CLK_OFFSET (0x1C) //0x70/4, so the number of unsigned ints to increment by.
-#define DMA_BASE           (BCM2708_PERI_BASE + 0x007000)
 
 #define GET_CYCLE(v) asm volatile ("mrc p15, 0, %0, c9, c13, 0":"=r" (v));
 
@@ -37,42 +35,10 @@
 #define CLK_PLLD_SRC    (6)
 #define CLK_FLIP        (1<<8)
 
-volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt, *dma, *dma_dest;
-volatile unsigned dma_cntrl[8] __attribute__ ((aligned (256)));
-int m_pagemap_fd;
+volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt;
 
-
-uintptr_t phys_addr(const volatile void * where){
-   uint64_t frameinfo;
-   ssize_t res = pread(m_pagemap_fd, &frameinfo, sizeof(frameinfo), (((uintptr_t)where) / 4096) * sizeof(frameinfo));
-#ifdef DEBUG
-   fprintf(stderr, "Reading at offset %u\n", ((uintptr_t)where/4096));
-   if(res != sizeof(frameinfo)){ 
-      fprintf(stderr, "Error: pread() failed (%d): %s\n", errno, strerror(errno));
-      return 0;
-   }
-   if(((frameinfo >> 62)) != 1<<1){
-      fprintf(stderr, "Error: Page not present?\n");
-   }
-   fprintf(stderr, "Physical address: %#0xu\n", (unsigned)(frameinfo * 4096) + (unsigned)where % 4096);
-#endif
-   return (uintptr_t)(frameinfo * 4096) + ((uintptr_t)where % 4096);
-}
 
 int setup() {
-  pid_t pid = getpid();
-  char pagemap_file[50];
-  sprintf(pagemap_file, "/proc/%d/pagemap", pid);
-  //char *pagemap_file = "/proc/self/pagemap";
-  m_pagemap_fd = open(pagemap_file, 'r');
-#ifdef DEBUG
-  //fprintf(stderr, "PID: %d\n", pid);
-  if(m_pagemap_fd < 0) {
-    fprintf(stderr, "Mem open error\n");
-    return(0);
-  }
-#endif
-  
   int memfd;
   void *gpio_map,*clk_map,*int_map, *dma_map;
 
@@ -90,13 +56,11 @@ int setup() {
 
   int_map =  mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,INTERUPT_BASE);
 
-  dma_map =  mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_SHARED,memfd,DMA_BASE);
-
   close(memfd);
 
 #ifdef DEBUG
   if(gpio_map == MAP_FAILED  || clk_map == MAP_FAILED 
-     || clk_map == MAP_FAILED || dma_map == MAP_FAILED) {
+     || clk_map == MAP_FAILED) {
     printf("Map failed\n");
     return(0);
   }
@@ -114,8 +78,6 @@ int setup() {
   gpclr = gpio + 10;    // clr bit register
   gpin = gpio + 13;     // read all bits register
 
-  dma = (volatile unsigned *)dma_map;
-
   //Now that we've set up the register access stuff
   //for convenience, we can also setup pin 4 
   //to output the GPIO clock output
@@ -126,11 +88,9 @@ int setup() {
   //Now set pin 4 to alt function 0
   *gpio |= 4<<12;
 
-  //Now set pin 14 and 15 to output, for exciting the transducer 
+  //Now set pin 14 to output, for exciting the transducer 
   *(gpio+1) &= ~(7<<12);
   *(gpio+1) |= (1<<12);
-  *(gpio+1) &= ~(7<<15);
-  *(gpio+1) |= (1<<15);
    
 
   //Set the ADC input pins as inputs.
@@ -142,26 +102,6 @@ int setup() {
   *(gpio+1) &= ~(0x7 << 27); //19
   *(gpio+2) &= ~(0x3F); //20/21
   *(gpio+2) &= ~(0x7 << 18); //26
-
-
-  //Now we'll configure DMA stuff
-  dma_dest = (volatile unsigned *)valloc(4096);
-  dma_dest[0] = 0;
-  mlock((void*)dma_dest, 4096);
-  if(*gpin) printf("This print unnecessary\n");
-
-  //Apparently the control value has to be 256-bit aligned in memory, and this
-  //is how you do that. (?)
-  dma_cntrl[0] = 1<<4; //Read the same location and write w/ offset of 32 bits
-  dma_cntrl[1] = 0x20200000;
-  dma_cntrl[2] = phys_addr(dma_dest);
-  dma_cntrl[3] = 4096; //10,000 unsigned ints = 40000 bytes
-  dma_cntrl[4] = 0;
-  dma_cntrl[5] = 0;
-  dma_cntrl[6] = 0;
-  dma_cntrl[7] = 0;
-  mlock((void*)dma_cntrl, 8*sizeof(unsigned));
-
 
   return(1);
 }
@@ -205,13 +145,18 @@ int interrupts(int flag) {
   return(1);
 }
 
-int main(){
-   unsigned timer1, timer2;
+int main(int argc, char *argv[]){
+   if(argc < 2){
+      printf("Error, must include filename output as arg 1\n");
+      exit(1);
+   }
+   
+   unsigned timer1, timer2, measurements[1000], timings[1000], num_measures = 0;
    //format: GPIO pins 0, timer0, GPIO pins 1, timer1, ...
    setup();
 
    //disable interrupts while we do this.
-   //while(!interrupts(0));
+   while(!interrupts(0));
 
    //Configure and enable ADC clock
    //First, turn off the gpio clock.
@@ -229,11 +174,11 @@ int main(){
 #endif
 
    //Now configure clock scaling frequency
-   *(clk+1) = CLK_PSWD | (250<<12); //~1.8MHz
+   *(clk+1) = CLK_PSWD | (300<<12); //~2MHz
    *clk =     CLK_PSWD | CLK_PLLD_SRC;
    *clk =     CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
    
-   //Wait a couple cycles to be sure the clock & DMA start
+   //Wait a couple cycles to be sure the clock starts
    GET_CYCLE(timer1);
    GET_CYCLE(timer2);
    while(timer2 - timer1 < 1400){
@@ -249,92 +194,69 @@ int main(){
       GET_CYCLE(timer2);
    }
    *gpclr = 1<<14;
-   //Now wait before enabling voltage to the measurement system.
-   while(timer2 - timer1 < 24000){
-      GET_CYCLE(timer2);
-   }
-   *gpset = 1<<15;
 
-   //re-enable interrupts now that the time-sensitive part is done.
-   //interrupts(1);
- 
-   //Now configure input reads from DMA
-   int dma_to_use = 4;
-   while(dma_to_use < 15 && (*(dma+dma_to_use*0x100) & 1)) dma_to_use += 1;
-   if(dma_to_use == 15) return 111;
-#ifdef DEBUG
-   //fprintf(stderr, "%u\n", phys_addr(dma_cntrl));
-   fprintf(stderr, "Using DMA %u\n", dma_to_use);
-#endif
-   *(dma + dma_to_use*0x100 + 1) = phys_addr(dma_cntrl);
-   *(dma + dma_to_use*0x100) |= 1;
-
-   GET_CYCLE(timer1);
-   GET_CYCLE(timer2);
-   while((*(dma+dma_to_use*0x100) & 1) && timer2-timer1 < 125000) GET_CYCLE(timer2);
-   //disable dma in case it didn't finish on its own.
-   if(*(dma+dma_to_use*0x100) & 1) fprintf(stderr, "DMA didn't finish.\n");
-   else fprintf(stderr, "DMA finshed in %fus\n", (float)(timer2-timer1)*0.000833);
-   *(dma+dma_to_use*0x100) &= ~1;
-
-#ifdef DEBUG
-   fprintf(stderr, "done\n");
-#endif
    
-   //Disable voltage to the measurement system.
-   *gpclr = 1<<15;
-
+   while(timer2 - timer1 < 125000){
+      measurements[num_measures] = *gpin;
+      GET_CYCLE(timer2);
+      timings[num_measures] = timer2;
+      num_measures++;
+   }
+   
+ 
+   //re-enable interrupts now that the time-sensitive part is done.
+   interrupts(1);
+   
    //Now disable ADC clock
    *clk = CLK_PSWD | CLK_PLLD_SRC;
    
-   //Pull measurements from input array
-   unsigned *actual_measurements = (unsigned*)malloc(sizeof(unsigned)*600);
-   unsigned num_measures = 0;
-   for(int i = 0; i < 4096/8; i++){
-      if(dma_dest[i] & 1<<5){
-         actual_measurements[num_measures] = dma_dest[i];
-         i++;
-         while((i < 4096/8) && (dma_dest[i] & 1<<5)){
-            actual_measurements[num_measures] = dma_dest[i];
-            i++;
-         }
-         
-         num_measures++;
-      }
-   }
-
-  // Convert gpio pins to actual value.
+  // Convert gpio pins to actual value and print to file
+  FILE *output_file = fopen(argv[1], "w");
   // Pins 6, 13, 19, 26, 12, 16, 20, and 21 are the ADC output DB pins (int order.)
+  double time_delay = 0;
+  unsigned previous_time = timings[0];
    for(int i = 0; i < num_measures; i++){
-      unsigned converted_val = ((actual_measurements[i] >> 6) & 1);
-      converted_val |= (((actual_measurements[i] >> 13) & 1) << 1);
-      converted_val |= (((actual_measurements[i] >> 19) & 1) << 2);
-      converted_val |= (((actual_measurements[i] >> 26) & 1) << 3);
-      converted_val |= (((actual_measurements[i] >> 12) & 1) << 4);
-      converted_val |= (((actual_measurements[i] >> 16) & 1) << 5);
-      converted_val |= (((actual_measurements[i] >> 20) & 1) << 6);
-      converted_val |= (((actual_measurements[i] >> 21) & 1) << 7);
+      unsigned converted_val = ((measurements[i] >> 6) & 1);
+      converted_val |= (((measurements[i] >> 13) & 1) << 1);
+      converted_val |= (((measurements[i] >> 19) & 1) << 2);
+      converted_val |= (((measurements[i] >> 26) & 1) << 3);
+      converted_val |= (((measurements[i] >> 12) & 1) << 4);
+      converted_val |= (((measurements[i] >> 16) & 1) << 5);
+      converted_val |= (((measurements[i] >> 20) & 1) << 6);
+      converted_val |= (((measurements[i] >> 21) & 1) << 7);
       
-      printf("%u", ((actual_measurements[i] >> 6) & 1));
-      printf("%u", ((actual_measurements[i] >> 13) & 1));
-      printf("%u", ((actual_measurements[i] >> 19) & 1));
-      printf("%u", ((actual_measurements[i] >> 26) & 1));
-      printf("%u", ((actual_measurements[i] >> 12) & 1));
-      printf("%u", ((actual_measurements[i] >> 16) & 1));
-      printf("%u", ((actual_measurements[i] >> 20) & 1));
-      printf("%u -> ", ((actual_measurements[i] >> 21) & 1));
+      printf("%u", ((measurements[i] >> 6) & 1));
+      printf("%u", ((measurements[i] >> 13) & 1));
+      printf("%u", ((measurements[i] >> 19) & 1));
+      printf("%u", ((measurements[i] >> 26) & 1));
+      printf("%u", ((measurements[i] >> 12) & 1));
+      printf("%u", ((measurements[i] >> 16) & 1));
+      printf("%u", ((measurements[i] >> 20) & 1));
+      printf("%u -> ", ((measurements[i] >> 21) & 1));
       
-      actual_measurements[i] = converted_val;
+      measurements[i] = converted_val;
 
-      double voltage = (double)converted_val/255 * 2;
+      double voltage = (double)converted_val/255 * 2.5;
+
+      //Figure out real time delay, assuming no fully looped cycle counts.
+      if(previous_time > timings[i]){
+         time_delay += ((double)(((long unsigned)timings[i] + (long unsigned)0xFFFFFFFF) - previous_time)) * 0.000833;
+         fprintf(stderr, "Looped. Prev: %u, calced curred: %lu\n", previous_time, (long unsigned)timings[i] + (long unsigned)0xFFFFFFFF);
+      } else {
+         time_delay += ((double)(timings[i] - previous_time)) * 0.000833;
+      }
+      previous_time = timings[i];
+      
 
       //For now, just print the value & timestamp.
-      printf("%4.3f\n", voltage);
+      printf("%4.3f @ %fus\n", voltage, time_delay);
+
+      //Also write to file output
+      fprintf(output_file, "%f,%f\n", voltage, time_delay);
    }
 
    printf("Total measurements: %u\n", num_measures);
-   
-   close(m_pagemap_fd);
 
+   
    return 0;
 }
