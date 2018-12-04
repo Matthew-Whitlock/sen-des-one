@@ -9,7 +9,7 @@ void enable_ccr(void *info){
 
 int init_module(void){
    on_each_cpu(enable_ccr,NULL,0);
-   asm volatile ("mcr p15, 0, %0, c15, c9, 0\n" : : "r" (1));
+   //asm volatile ("mcr p15, 0, %0, c15, c9, 0\n" : : "r" (1));
    printk (KERN_INFO "User-level access to CCR has been turned on.\n");
    return 0;
 }
