@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <sys/io.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -40,7 +39,6 @@
 
 volatile unsigned *gpio,*gpset,*gpclr,*gpin,*clk,*intrupt, *dma, *dma_dest;
 volatile unsigned dma_cntrl[8] __attribute__ ((aligned (256)));
-volatile unsigned dma_src_tmp;
 int m_pagemap_fd;
 
 
@@ -53,20 +51,20 @@ uintptr_t phys_addr(const volatile void * where){
       fprintf(stderr, "Error: pread() failed (%d): %s\n", errno, strerror(errno));
       return 0;
    }
-   if(((frameinfo >> 55) & 0xFBF) != 0x10c){
-      fprintf(stderr, "Error: Page not present\n");
-      return 0;
+   if(((frameinfo >> 62)) != 1<<1){
+      fprintf(stderr, "Error: Page not present?\n");
    }
+   fprintf(stderr, "Physical address: %#0xu\n", (unsigned)(frameinfo * 4096) + (unsigned)where % 4096);
 #endif
    return (uintptr_t)(frameinfo * 4096) + ((uintptr_t)where % 4096);
 }
 
 int setup() {
-  //pid_t pid = getpid();
-  //char pagemap_file[50];
-  //sprintf(pagemap_file, "/proc/%d/pagemap", pid);
-  char *pagemap_file = "/proc/self/pagemap\0";
-  int m_pagemap_fd = open(pagemap_file, O_RDWR);
+  pid_t pid = getpid();
+  char pagemap_file[50];
+  sprintf(pagemap_file, "/proc/%d/pagemap", pid);
+  //char *pagemap_file = "/proc/self/pagemap";
+  m_pagemap_fd = open(pagemap_file, 'r');
 #ifdef DEBUG
   //fprintf(stderr, "PID: %d\n", pid);
   if(m_pagemap_fd < 0) {
@@ -147,21 +145,23 @@ int setup() {
 
 
   //Now we'll configure DMA stuff
-  dma_dest = (unsigned *)malloc(10000*sizeof(unsigned));
+  dma_dest = (volatile unsigned *)valloc(4096);
   dma_dest[0] = 0;
-  dma_src_tmp = 1<<5;
+  mlock((void*)dma_dest, 4096);
+  if(*gpin) printf("This print unnecessary\n");
+
   //Apparently the control value has to be 256-bit aligned in memory, and this
   //is how you do that. (?)
   dma_cntrl[0] = 1<<4; //Read the same location and write w/ offset of 32 bits
-  dma_cntrl[1] = phys_addr(&dma_src_tmp);
+  dma_cntrl[1] = 0x20200000;
   dma_cntrl[2] = phys_addr(dma_dest);
-  dma_cntrl[3] = 1<<4; //10,000 unsigned ints = 40000 bytes
+  dma_cntrl[3] = 4096; //10,000 unsigned ints = 40000 bytes
   dma_cntrl[4] = 0;
   dma_cntrl[5] = 0;
   dma_cntrl[6] = 0;
   dma_cntrl[7] = 0;
+  mlock((void*)dma_cntrl, 8*sizeof(unsigned));
 
-  unsigned tmp = *gpin;
 
   return(1);
 }
@@ -233,17 +233,6 @@ int main(){
    *clk =     CLK_PSWD | CLK_PLLD_SRC;
    *clk =     CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
    
-   //Now configure input reads from DMA
-   int dma_to_use = 0;
-   while(dma_to_use < 15 && (*(dma+dma_to_use*0x100) & 1)) dma_to_use += 1;
-   if(dma_to_use == 15) return 111;
-#ifdef DEBUG
-   //fprintf(stderr, "%u\n", phys_addr(dma_cntrl));
-   fprintf(stderr, "Using DMA %u\n", dma_to_use);
-#endif
-   *(dma + dma_to_use*0x100 + 1) = phys_addr(dma_cntrl);
-   *(dma + dma_to_use*0x100) |= 1;
-
    //Wait a couple cycles to be sure the clock & DMA start
    GET_CYCLE(timer1);
    GET_CYCLE(timer2);
@@ -269,14 +258,23 @@ int main(){
    //re-enable interrupts now that the time-sensitive part is done.
    //interrupts(1);
  
-   //Now we just need to wait for the dma to finish.
+   //Now configure input reads from DMA
+   int dma_to_use = 4;
+   while(dma_to_use < 15 && (*(dma+dma_to_use*0x100) & 1)) dma_to_use += 1;
+   if(dma_to_use == 15) return 111;
 #ifdef DEBUG
-   fprintf(stderr, "Waiting on DMA... "); 
+   //fprintf(stderr, "%u\n", phys_addr(dma_cntrl));
+   fprintf(stderr, "Using DMA %u\n", dma_to_use);
 #endif
+   *(dma + dma_to_use*0x100 + 1) = phys_addr(dma_cntrl);
+   *(dma + dma_to_use*0x100) |= 1;
+
    GET_CYCLE(timer1);
    GET_CYCLE(timer2);
    while((*(dma+dma_to_use*0x100) & 1) && timer2-timer1 < 125000) GET_CYCLE(timer2);
    //disable dma in case it didn't finish on its own.
+   if(*(dma+dma_to_use*0x100) & 1) fprintf(stderr, "DMA didn't finish.\n");
+   else fprintf(stderr, "DMA finshed in %fus\n", (float)(timer2-timer1)*0.000833);
    *(dma+dma_to_use*0x100) &= ~1;
 
 #ifdef DEBUG
@@ -292,12 +290,11 @@ int main(){
    //Pull measurements from input array
    unsigned *actual_measurements = (unsigned*)malloc(sizeof(unsigned)*600);
    unsigned num_measures = 0;
-   for(int i = 0; i < 10000; i++){
+   for(int i = 0; i < 4096/8; i++){
       if(dma_dest[i] & 1<<5){
-         printf("Here\n");
          actual_measurements[num_measures] = dma_dest[i];
          i++;
-         while((i < 10000) && (dma_dest[i] & 1<<5)){
+         while((i < 4096/8) && (dma_dest[i] & 1<<5)){
             actual_measurements[num_measures] = dma_dest[i];
             i++;
          }
