@@ -1,5 +1,8 @@
 register_level_gpio
 
+#NDT output files
+*.ndt
+
 # Prerequisites
 *.d
 
@@ -37,6 +40,7 @@ register_level_gpio
 *.i*86
 *.x86_64
 *.hex
+*.class
 
 # Debug files
 *.dSYM/
