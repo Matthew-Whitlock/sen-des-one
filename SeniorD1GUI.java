@@ -13,6 +13,12 @@ import java.lang.ProcessBuilder.*;
 import javax.swing.filechooser.FileSystemView;
 import java.io.File;
 
+import org.jfree.chart.*;
+import org.jfree.chart.plot.*;
+import org.jfree.ui.*;
+import org.jfree.data.xy.*;
+
+
 public class SeniorD1GUI{
 	private static JFrame frame;
 	private static JLabel distance;
@@ -20,7 +26,7 @@ public class SeniorD1GUI{
 	private static JSplitPane plotPanel;
 	private static JPanel filesPanel;
 	private static JPanel graphPanel;
-	private static double speedOfSound = 5400.0;
+	private static double speedOfSound = 6300.0;
 	private static double calibrationSpeed = -1;
 	private static double nCal = -1;
 	
@@ -118,7 +124,7 @@ public class SeniorD1GUI{
 		
 		//Make plotting panel stuff
 		filesPanel = new JPanel(new BorderLayout());
-		graphPanel = new JPanel(new GridBagLayout());
+		graphPanel = new JPanel(new BorderLayout());
 		plotPanel = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, filesPanel, graphPanel);
 		
 		gbc.weighty = 0;
@@ -169,8 +175,44 @@ public class SeniorD1GUI{
       frame.setVisible(true);
 	}
 	
-	private static void doPlot(String filename){
-		System.out.println(filename);
+	private static void doPlot(String fileName){
+		XYDataset dataset = getData(fileName);
+		JFreeChart chart = ChartFactory.createXYLineChart(
+			"Signal value over time",
+			"Time (us)",
+			"Voltage (V)",
+			dataset,
+			PlotOrientation.VERTICAL,
+			true,true,false);
+		chart.removeLegend();
+		ChartPanel panel = new ChartPanel(chart);
+		graphPanel.removeAll();
+		graphPanel.add(panel, BorderLayout.CENTER);
+		panel.setPreferredSize( new Dimension( 100000 , 1000000 ) );
+		panel.setMinimumSize( new Dimension( 100000 , 1000000 ) );
+		plotPanel.revalidate();
+		plotPanel.repaint();
+		
+	}
+	
+	private static XYDataset getData(String fileName){
+		try{
+			
+			XYSeriesCollection dataset = new XYSeriesCollection();
+			XYSeries series = new XYSeries("");
+			BufferedReader reader = new BufferedReader(new FileReader(fileName));
+			String line = reader.readLine();
+			while(line != null){
+				series.add(Double.parseDouble(line.split(",")[0]), 
+						Double.parseDouble(line.split(",")[1]));	
+				line = reader.readLine();
+			}
+			dataset.addSeries(series);
+			return dataset;
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+		return null;
 	}
 	
 	private static void updateSpeed(double newSpeed){
