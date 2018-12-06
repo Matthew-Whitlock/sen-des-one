@@ -1,6 +1,7 @@
 register_level_gpio
 
 #NDT output files
+temp
 *.ndt
 
 # Prerequisites

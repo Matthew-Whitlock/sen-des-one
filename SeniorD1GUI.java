@@ -9,9 +9,9 @@ import java.text.SimpleDateFormat;
 import javax.swing.event.*;
 import java.awt.Graphics.*;
 import java.lang.*;
+import java.lang.ProcessBuilder.*;
 import javax.swing.filechooser.FileSystemView;
 import java.io.File;
-//import java.awt.Dialog.ModalityType;
 
 public class SeniorD1GUI{
 	private static JFrame frame;
@@ -93,7 +93,7 @@ public class SeniorD1GUI{
 		
 		JLabel bottomText = new JLabel("Distance to flaw = ");
 		bottomText.setFont(generalFont);
-		distance = new JLabel("12");
+		distance = new JLabel("      ");
 		distance.setFont(boldFont);
 		bottomText2 = new JLabel(" cm (5400 m/s)");
 		bottomText2.setFont(generalFont);
@@ -164,7 +164,9 @@ public class SeniorD1GUI{
 		frame.setSize(1000,600);
 		frame.setLocationRelativeTo(null);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		frame.setVisible(true);
+		frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+      frame.setUndecorated(true);
+      frame.setVisible(true);
 	}
 	
 	private static void doPlot(String filename){
@@ -173,7 +175,7 @@ public class SeniorD1GUI{
 	
 	private static void updateSpeed(double newSpeed){
 		speedOfSound = newSpeed;
-		bottomText2.setText(" cm (" + Double.toString(speedOfSound) + " m/s)");
+		bottomText2.setText(" cm (" + String.format("%7.3f", speedOfSound) + " m/s)");
 	}
 	
 	private static double doMeasure(){
@@ -182,59 +184,76 @@ public class SeniorD1GUI{
 		return doMeasure(fileName);
 	}
 	
-	private static double doMeasure(String s){
-		String fileName = s;
-		Runtime rt = Runtime.getRuntime();
-		double distanceToFlaw = 0;
+   private static double doMeasure(String fileName){
+      double time = getMeasureTime(fileName, 0);
+      return time / 2 * 0.0001 * speedOfSound;
+   }
+
+   private static double getMeasureTime(String fileName, int numTries){
+      String cmd[] = {"/bin/bash", "-c", "sudo chrt -f 90 taskset -c 2 ./register_level_gpio " + fileName};
+		String cmd_fix[] = {"/bin/bash", "-c", "sudo chmod 777 " + fileName};
+      double timeToFlaw = 0;
 		try{
-			Process pr = rt.exec("sudo chrt -f 90 taskset -c 2 ./register_level_gpio.c " + fileName);
-			pr.waitFor();
-			BufferedReader reader = new BufferedReader(new FileReader(fileName));
+			ProcessBuilder pb = new ProcessBuilder(cmd);
+			pb.redirectOutput(Redirect.INHERIT);
+         pb.redirectError(Redirect.INHERIT);
+         Process pr = pb.start();
+         //pr.waitFor();
+		   Thread.sleep(50);	
+			
+         ProcessBuilder pb_fix = new ProcessBuilder(cmd_fix);
+			pb_fix.redirectOutput(Redirect.INHERIT);
+         pb_fix.redirectError(Redirect.INHERIT);
+         Process pr_fix = pb_fix.start();
+		   Thread.sleep(10);	
+         
+         BufferedReader reader = new BufferedReader(new FileReader(fileName));
+         System.out.println("Opened file");
 			String line = reader.readLine();
+         System.out.println("Read first line");
 			while(line != null){
-				if(Float.parseFloat(line.split(",")[0]) > 0.3){
-					distanceToFlaw = Double.parseDouble(line.split(",")[1]) / 2 * 0.000001 * speedOfSound;
-					break;
+				if(Float.parseFloat(line.split(",")[1]) >= 13 && Float.parseFloat(line.split(",")[0]) > 0.5){
+					timeToFlaw = Double.parseDouble(line.split(",")[1]);
+               break;
 				}
+			   line = reader.readLine();
 			}
+         
+         if(timeToFlaw == 0 && numTries <20){
+            ProcessBuilder pb_rm = new ProcessBuilder(new String[] {"/bin/bash", "-c", "rm " + fileName});
+            pb_rm.redirectOutput(Redirect.INHERIT);
+            pb_rm.redirectError(Redirect.INHERIT);
+            Process pr_rm = pb_rm.start();
+            Thread.sleep(10);	
+
+            return getMeasureTime(fileName, numTries + 1);
+         }
+         
 		} catch(Exception e){
-			//Who cares?
+			e.printStackTrace();
 		}
-		return distanceToFlaw;
+      
+
+		return timeToFlaw;
 	}
 	
 	private static void doMeasureAndShow(){
-		distance.setText(Double.toString(doMeasure()));
+		distance.setText(String.format("%5.1f", doMeasure()));
 	}
 	
 	private static void setCalSpeed(double distanceToFlaw){
-		String fileName = "temp";
-		Runtime rt = Runtime.getRuntime();
-		//double distanceToFlaw = 0;
-		try{
-			Process pr = rt.exec("sudo chrt -f 90 taskset -c 2 ./register_level_gpio.c " + fileName);
-			pr.waitFor();
-			BufferedReader reader = new BufferedReader(new FileReader(fileName));
-			String line = reader.readLine();
-			while(line != null){
-				if(Float.parseFloat(line.split(",")[0]) > 0.3){
-					double tempSpeed = distanceToFlaw*2/(Double.parseDouble(line.split(",")[1])*0.000001);
-					if (nCal == -1) {
-						calibrationSpeed = tempSpeed;
-						nCal = 1;
-					} else if (nCal > 0){
-						nCal++;
-						calibrationSpeed = (nCal-1)*calibrationSpeed/nCal + tempSpeed/nCal;
-					} 
-					return;
-				}
-			}
-		} catch(Exception e){
-			//Who cares?
-		}
+      double tempSpeed = distanceToFlaw*2*0.01/(getMeasureTime("temp", 0)*0.000001);
+      if (nCal == -1) {
+         calibrationSpeed = tempSpeed;
+         nCal = 1;
+      } else if (nCal > 0){
+         nCal++;
+         calibrationSpeed = (nCal-1)*calibrationSpeed/nCal + tempSpeed/nCal;
+      }
 	}
 	
 	private static void doCalibrate(){
+      nCal = -1;
 		final String calpan = "calpan";
 		final String confirmpan = "confirmpan";
 		JDialog calibrationDialog = new JDialog(frame, "Calibration - Please enter distance to flaw");
@@ -291,7 +310,7 @@ public class SeniorD1GUI{
 				return;
 			}
 			setCalSpeed(distanceVal);
-			confirmLabel.setText("Calibrated speed: " + Double.toString(calibrationSpeed) + " m/s");
+			confirmLabel.setText("Calibrated speed: " + String.format("%7.3f", calibrationSpeed) + " m/s");
 			((CardLayout) (topLevelCalPanel.getLayout())).show(topLevelCalPanel, confirmpan);
 			calibrationDialog.setSize(300,85);
 		});

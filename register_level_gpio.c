@@ -254,6 +254,8 @@ int main(int argc, char *argv[]){
       //Also write to file output
       fprintf(output_file, "%f,%f\n", voltage, time_delay);
    }
+   
+   fclose(output_file);
 
    printf("Total measurements: %u\n", num_measures);
 
