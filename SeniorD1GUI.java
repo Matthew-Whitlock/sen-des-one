@@ -101,7 +101,7 @@ public class SeniorD1GUI{
 		bottomText.setFont(generalFont);
 		distance = new JLabel("      ");
 		distance.setFont(boldFont);
-		bottomText2 = new JLabel(" cm (5400 m/s)");
+		bottomText2 = new JLabel(" cm (6300 m/s)");
 		bottomText2.setFont(generalFont);
 		JLabel filler1 = new JLabel();
 		JLabel filler2 = new JLabel();
@@ -129,7 +129,8 @@ public class SeniorD1GUI{
 		
 		gbc.weighty = 0;
 		gbc.gridy = 2;
-		JButton returnButton = new JButton("Return to main menu");
+		JButton returnButton = new JButton("Return");
+		returnButton.setFont(generalFont);
 		returnButton.addActionListener(e -> cardLayout.show(cards, mainPanelID));
 		filesPanel.add(returnButton, BorderLayout.SOUTH);
 		
@@ -147,6 +148,7 @@ public class SeniorD1GUI{
 			
 			JList<String> fileList = new JList<String>(filesToDisp.toArray(new String[filesToDisp.size()]));
 			fileList.setSelectionMode(DefaultListSelectionModel.SINGLE_SELECTION);
+			fileList.setFont(generalFont);
 			
 			MouseListener mouseListener = new MouseAdapter() {
 				public void mouseClicked(MouseEvent e) {
@@ -203,8 +205,8 @@ public class SeniorD1GUI{
 			BufferedReader reader = new BufferedReader(new FileReader(fileName));
 			String line = reader.readLine();
 			while(line != null){
-				series.add(Double.parseDouble(line.split(",")[0]), 
-						Double.parseDouble(line.split(",")[1]));	
+				series.add(Double.parseDouble(line.split(",")[1]), 
+						Double.parseDouble(line.split(",")[0]));	
 				line = reader.readLine();
 			}
 			dataset.addSeries(series);
@@ -228,13 +230,13 @@ public class SeniorD1GUI{
 	
    private static double doMeasure(String fileName){
       double time = getMeasureTime(fileName, 0);
-      return time / 2 * 0.0001 * speedOfSound;
+      return time == -1 ? -1 : time / 2 * 0.0001 * speedOfSound;
    }
 
    private static double getMeasureTime(String fileName, int numTries){
       String cmd[] = {"/bin/bash", "-c", "sudo chrt -f 90 taskset -c 2 ./register_level_gpio " + fileName};
 		String cmd_fix[] = {"/bin/bash", "-c", "sudo chmod 777 " + fileName};
-      double timeToFlaw = 0;
+      double timeToFlaw = -1;
 		try{
 			ProcessBuilder pb = new ProcessBuilder(cmd);
 			pb.redirectOutput(Redirect.INHERIT);
@@ -261,14 +263,14 @@ public class SeniorD1GUI{
 			   line = reader.readLine();
 			}
          
-         if(timeToFlaw == 0 && numTries <20){
+         if(timeToFlaw == -1){
             ProcessBuilder pb_rm = new ProcessBuilder(new String[] {"/bin/bash", "-c", "rm " + fileName});
             pb_rm.redirectOutput(Redirect.INHERIT);
             pb_rm.redirectError(Redirect.INHERIT);
             Process pr_rm = pb_rm.start();
             Thread.sleep(10);	
 
-            return getMeasureTime(fileName, numTries + 1);
+            return numTries < 20 ? -1 : getMeasureTime(fileName, numTries + 1);
          }
          
 		} catch(Exception e){
