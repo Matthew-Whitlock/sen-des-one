@@ -174,7 +174,7 @@ int main(int argc, char *argv[]){
 #endif
 
    //Now configure clock scaling frequency
-   *(clk+1) = CLK_PSWD | (300<<12); //~2MHz
+   *(clk+1) = CLK_PSWD | (250<<12); //~2MHz
    *clk =     CLK_PSWD | CLK_PLLD_SRC;
    *clk =     CLK_PSWD | CLK_PLLD_SRC | CLK_ENABLE;
    
